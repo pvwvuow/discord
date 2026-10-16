@@ -1,0 +1,58 @@
+name: mirror-sync
+
+# همگام‌سازی آینه‌ی سایت فریم از مخزن اصلی (pvwvuow/frame → پوشه‌ی docs)
+#   • هر ۶ ساعت خودکار اجرا می‌شود
+#   • هر push روی main (برای اولین همگام‌سازی پس از راه‌اندازی)
+#   • اجرای دستی از تب Actions
+#
+# فایل CNAME این مخزن (discord.tvframe.vip) همیشه دست‌نخورده نگه داشته می‌شود.
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mirror-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: دریافت محتوای تازه از مخزن frame (فقط docs)
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/pvwvuow/frame.git /tmp/frame
+          cd /tmp/frame
+          git sparse-checkout set docs
+
+      - name: همگام‌سازی محتوا
+        run: |
+          # پاک‌سازی محتوای قبلی (به‌جز فایل‌های خودِ آینه)
+          find . -mindepth 1 -maxdepth 1 \
+            ! -name '.git' ! -name '.github' ! -name 'CNAME' ! -name 'README.md' \
+            -exec rm -rf {} +
+
+          # کپی محتوای سایت از مخزن اصلی
+          cp -a /tmp/frame/docs/. .
+
+          # حفظ دامنه‌ی آینه در CNAME
+          echo "discord.tvframe.vip" > CNAME
+
+          git config user.name "mirror-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "بدون تغییر — آینه از قبل به‌روز است"
+          else
+            git commit -m "[skip ci] همگام‌سازی آینه از pvwvuow/frame@main"
+            git push
+          fi
